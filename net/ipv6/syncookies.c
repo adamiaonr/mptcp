@@ -139,7 +139,7 @@ EXPORT_SYMBOL_GPL(__cookie_v6_check);
 struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_options_received tcp_opt;
-	struct mptcp_options_received mopt;
+	struct mptcp_options_received mopt;	
 	struct inet_request_sock *ireq;
 	struct tcp_request_sock *treq;
 	struct ipv6_pinfo *np = inet6_sk(sk);
@@ -186,7 +186,7 @@ struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)
 
 	ireq = inet_rsk(req);
 	ireq->mptcp_rqsk = 0;
-	ireq->saw_mpc = 0;
+	ireq->saw_mpc = 0;	
 	treq = tcp_rsk(req);
 	treq->tfo_listener = false;
 
@@ -194,7 +194,7 @@ struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)
 	 * hash_entry of the MPTCP request-sock.
 	 */
 	if (mopt.saw_mpc)
-		mptcp_cookies_reqsk_init(req, &mopt, skb);
+		mptcp_cookies_reqsk_init(req, &mopt, skb);	
 
 	if (security_inet_conn_request(sk, skb, req))
 		goto out_free;

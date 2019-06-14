@@ -316,7 +316,7 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb)
 {
 	struct ip_options *opt = &TCP_SKB_CB(skb)->header.h4.opt;
 	struct tcp_options_received tcp_opt;
-	struct mptcp_options_received mopt;
+	struct mptcp_options_received mopt;	
 	struct inet_request_sock *ireq;
 	struct tcp_request_sock *treq;
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -377,7 +377,7 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb)
 	ireq->wscale_ok		= tcp_opt.wscale_ok;
 	ireq->tstamp_ok		= tcp_opt.saw_tstamp;
 	ireq->mptcp_rqsk	= 0;
-	ireq->saw_mpc		= 0;
+	ireq->saw_mpc		= 0;	
 	req->ts_recent		= tcp_opt.saw_tstamp ? tcp_opt.rcv_tsval : 0;
 	treq->snt_synack.v64	= 0;
 	treq->tfo_listener	= false;

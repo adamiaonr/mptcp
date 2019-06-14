@@ -71,6 +71,9 @@ int sysctl_tcp_slow_start_after_idle __read_mostly = 1;
 unsigned int sysctl_tcp_notsent_lowat __read_mostly = UINT_MAX;
 EXPORT_SYMBOL(sysctl_tcp_notsent_lowat);
 
+// static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+// 			   int push_one, gfp_t gfp);
+
 /* Account for new data that has been sent to the network. */
 void tcp_event_new_data_sent(struct sock *sk, const struct sk_buff *skb)
 {
@@ -180,8 +183,13 @@ static void tcp_event_data_sent(struct tcp_sock *tp,
 }
 
 /* Account for an ACK we sent. */
-static inline void tcp_event_ack_sent(struct sock *sk, unsigned int pkts)
+static inline void tcp_event_ack_sent(struct sock *sk, unsigned int pkts,
+				      u32 rcv_nxt)
 {
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	if (unlikely(rcv_nxt != tp->rcv_nxt))
+		return;  /* Special ACK sent by DCTCP to reflect ECN */
 	tcp_dec_quickack_mode(sk, pkts);
 	inet_csk_clear_xmit_timer(sk, ICSK_TIME_DACK);
 }
@@ -292,7 +300,6 @@ u16 tcp_select_window(struct sock *sk)
 				      LINUX_MIB_TCPWANTZEROWINDOWADV);
 		new_win = ALIGN(cur_win, 1 << tp->rx_opt.rcv_wscale);
 	}
-
 	tp->rcv_wnd = new_win;
 	tp->rcv_wup = tp->rcv_nxt;
 
@@ -429,6 +436,17 @@ bool tcp_urg_mode(const struct tcp_sock *tp)
 #define OPTION_WSCALE		(1 << 3)
 #define OPTION_FAST_OPEN_COOKIE	(1 << 8)
 /* Before adding here - take a look at OPTION_MPTCP in include/net/mptcp.h */
+
+// struct tcp_out_options {
+// 	u16 options;		/* bit field of OPTION_* */
+// 	u16 mss;		/* 0 to disable */
+// 	u8 ws;			/* window scale, 0 to disable */
+// 	u8 num_sack_blocks;	/* number of SACK blocks to include */
+// 	u8 hash_size;		/* bytes in hash_location */
+// 	__u8 *hash_location;	/* temporary pointer, overloaded */
+// 	__u32 tsval, tsecr;	/* need to include OPTION_TS */
+// 	struct tcp_fastopen_cookie *fastopen_cookie;	/* Fast open cookie */
+// };
 
 /* Write previously computed TCP options to the packet.
  *
@@ -794,6 +812,7 @@ static void tcp_tasklet_func(unsigned long data)
 			if (mptcp(tp))
 				mptcp_tsq_flags(sk);
 		}
+
 exit:
 		bh_unlock_sock(meta_sk);
 
@@ -808,7 +827,6 @@ exit:
 			  (1UL << TCP_MTU_REDUCED_DEFERRED) |   \
 			  (1UL << MPTCP_PATH_MANAGER_DEFERRED) |\
 			  (1UL << MPTCP_SUB_DEFERRED))
-
 /**
  * tcp_release_cb - tcp release_sock() callback
  * @sk: socket
@@ -933,8 +951,8 @@ out:
  * We are working here with either a clone of the original
  * SKB, or a fresh unique copy made by the retransmit engine.
  */
-int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
-		        gfp_t gfp_mask)
+int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
+			      int clone_it, gfp_t gfp_mask, u32 rcv_nxt)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	struct inet_sock *inet;
@@ -1037,7 +1055,7 @@ int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	icsk->icsk_af_ops->send_check(sk, skb);
 
 	if (likely(tcb->tcp_flags & TCPHDR_ACK))
-		tcp_event_ack_sent(sk, tcp_skb_pcount(skb));
+		tcp_event_ack_sent(sk, tcp_skb_pcount(skb), rcv_nxt);
 
 	if (skb->len != tcp_header_size)
 		tcp_event_data_sent(tp, sk);
@@ -1066,6 +1084,13 @@ int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 	tcp_enter_cwr(sk);
 
 	return net_xmit_eval(err);
+}
+
+int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
+			    gfp_t gfp_mask)
+{
+	return __tcp_transmit_skb(sk, skb, clone_it, gfp_mask,
+				  tcp_sk(sk)->rcv_nxt);
 }
 
 /* This routine just queues the buffer for sending.
@@ -2280,7 +2305,7 @@ void tcp_send_loss_probe(struct sock *sk)
 	if (skb) {
 		if (tcp_snd_wnd_test(tp, skb, mss)) {
 			pcount = tp->packets_out;
-			tp->ops->write_xmit(sk, mss, TCP_NAGLE_OFF, 2, GFP_ATOMIC);
+			tcp_write_xmit(sk, mss, TCP_NAGLE_OFF, 2, GFP_ATOMIC);
 			if (tp->packets_out > pcount)
 				goto probe_sent;
 			goto rearm_timer;
@@ -2631,8 +2656,10 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 		return -EBUSY;
 
 	if (before(TCP_SKB_CB(skb)->seq, tp->snd_una)) {
-		if (before(TCP_SKB_CB(skb)->end_seq, tp->snd_una))
-			BUG();
+		if (unlikely(before(TCP_SKB_CB(skb)->end_seq, tp->snd_una))) {
+			WARN_ON_ONCE(1);
+			return -EINVAL;
+		}
 		if (tcp_trim_head(sk, skb, tp->snd_una - TCP_SKB_CB(skb)->seq))
 			return -ENOMEM;
 	}
@@ -3161,6 +3188,7 @@ static void tcp_connect_init(struct sock *sk)
 	sock_reset_flag(sk, SOCK_DONE);
 	tp->snd_wnd = 0;
 	tcp_init_wl(tp, 0);
+	tcp_write_queue_purge(sk);
 	tp->snd_una = tp->write_seq;
 	tp->snd_sml = tp->write_seq;
 	tp->snd_up = tp->write_seq;
@@ -3375,8 +3403,6 @@ void tcp_send_delayed_ack(struct sock *sk)
 	int ato = icsk->icsk_ack.ato;
 	unsigned long timeout;
 
-	tcp_ca_event(sk, CA_EVENT_DELAYED_ACK);
-
 	if (ato > TCP_DELACK_MIN) {
 		const struct tcp_sock *tp = tcp_sk(sk);
 		int max_ato = HZ / 2;
@@ -3425,15 +3451,13 @@ void tcp_send_delayed_ack(struct sock *sk)
 }
 
 /* This routine sends an ack and also updates the window. */
-void tcp_send_ack(struct sock *sk)
+void __tcp_send_ack(struct sock *sk, u32 rcv_nxt)
 {
 	struct sk_buff *buff;
 
 	/* If we have been reset, we may not send again. */
 	if (sk->sk_state == TCP_CLOSE)
 		return;
-
-	tcp_ca_event(sk, CA_EVENT_NON_DELAYED_ACK);
 
 	/* We are not putting this on the write queue, so
 	 * tcp_transmit_skb() will set the ownership to this
@@ -3462,9 +3486,14 @@ void tcp_send_ack(struct sock *sk)
 
 	/* Send it off, this clears delayed acks for us. */
 	skb_mstamp_get(&buff->skb_mstamp);
-	tcp_transmit_skb(sk, buff, 0, sk_gfp_atomic(sk, GFP_ATOMIC));
+	__tcp_transmit_skb(sk, buff, 0, sk_gfp_atomic(sk, GFP_ATOMIC), rcv_nxt);
 }
-EXPORT_SYMBOL_GPL(tcp_send_ack);
+EXPORT_SYMBOL_GPL(__tcp_send_ack);
+
+void tcp_send_ack(struct sock *sk)
+{
+	__tcp_send_ack(sk, tcp_sk(sk)->rcv_nxt);
+}
 
 /* This routine sends a packet with an out of date sequence
  * number. It assumes the other end will try to ack it.

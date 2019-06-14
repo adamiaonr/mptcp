@@ -72,6 +72,14 @@
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
 
+// static void	tcp_v6_send_reset(const struct sock *sk, struct sk_buff *skb);
+// static void	tcp_v6_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
+// 				      struct request_sock *req);
+
+// static int	tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb);
+
+// static const struct inet_connection_sock_af_ops ipv6_mapped;
+// static const struct inet_connection_sock_af_ops ipv6_specific;
 #ifdef CONFIG_TCP_MD5SIG
 static const struct tcp_sock_af_ops tcp_sock_ipv6_specific;
 static const struct tcp_sock_af_ops tcp_sock_ipv6_mapped_specific;
@@ -494,6 +502,7 @@ done:
 	return err;
 }
 
+
 void tcp_v6_reqsk_destructor(struct request_sock *req)
 {
 	kfree_skb(inet_rsk(req)->pktopts);
@@ -780,6 +789,7 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 	if (mptcp)
 		tot_len += MPTCP_SUB_LEN_DSS + MPTCP_SUB_LEN_ACK;
 #endif
+
 	buff = alloc_skb(MAX_HEADER + sizeof(struct ipv6hdr) + tot_len,
 			 GFP_ATOMIC);
 	if (!buff)
@@ -1477,6 +1487,10 @@ process:
 			reqsk_put(req);
 			goto discard_it;
 		}
+		if (tcp_checksum_complete(skb)) {
+			reqsk_put(req);
+			goto csum_error;
+		}
 		if (unlikely(sk->sk_state != TCP_LISTEN && !is_meta_sk(sk))) {
 			inet_csk_reqsk_queue_drop_and_put(sk, req);
 			goto lookup;
@@ -1525,7 +1539,6 @@ process:
 			return 0;
 		}
 	}
-
 	if (hdr->hop_limit < inet6_sk(sk)->min_hopcount) {
 		NET_INC_STATS_BH(net, LINUX_MIB_TCPMINTTLDROP);
 		goto discard_and_relse;
@@ -1574,7 +1587,6 @@ process:
 		NET_INC_STATS_BH(net, LINUX_MIB_TCPBACKLOGDROP);
 		goto discard_and_relse;
 	}
-
 	bh_unlock_sock(meta_sk);
 
 put_and_return:
@@ -1614,6 +1626,7 @@ discard_it:
 	return 0;
 
 discard_and_relse:
+	sk_drops_add(sk, skb);
 	sock_put(sk);
 	goto discard_it;
 
@@ -2012,7 +2025,6 @@ static void tcp_v6_clear_sk(struct sock *sk, int size)
 #ifdef CONFIG_MPTCP
 	memset(&tp->tk_table.pprev, 0, size_tk_table);
 #endif
-
 }
 
 struct proto tcpv6_prot = {

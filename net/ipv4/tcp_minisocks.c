@@ -124,7 +124,7 @@ tcp_timewait_state_process(struct inet_timewait_sock *tw, struct sk_buff *skb,
 		if (unlikely(mopt.mp_fclose) && tcptw->mptcp_tw) {
 			if (mopt.mptcp_sender_key == tcptw->mptcp_tw->loc_key)
 				goto kill_with_rst;
-		}
+		}		
 	}
 
 	if (tw->tw_substate == TCP_FIN_WAIT2) {
@@ -221,8 +221,9 @@ kill:
 				inet_twsk_deschedule_put(tw);
 				return TCP_TW_SUCCESS;
 			}
+		} else {
+			inet_twsk_reschedule(tw, TCP_TIMEWAIT_LEN);
 		}
-		inet_twsk_reschedule(tw, TCP_TIMEWAIT_LEN);
 
 		if (tmp_opt.saw_tstamp) {
 			tcptw->tw_ts_recent	  = tmp_opt.rcv_tsval;
@@ -529,7 +530,6 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 		newtp->snd_cwnd_cnt = 0;
 
 		tcp_init_xmit_timers(newsk);
-		__skb_queue_head_init(&newtp->out_of_order_queue);
 		newtp->write_seq = newtp->pushed_seq = treq->snt_isn + 1;
 
 		newtp->rx_opt.saw_tstamp = 0;
@@ -572,7 +572,7 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 			newtp->tcp_header_len = sizeof(struct tcphdr);
 		}
 		if (ireq->saw_mpc)
-			newtp->tcp_header_len += MPTCP_SUB_LEN_DSM_ALIGN;
+			newtp->tcp_header_len += MPTCP_SUB_LEN_DSM_ALIGN;		
 		newtp->tsoffset = 0;
 #ifdef CONFIG_TCP_MD5SIG
 		newtp->md5sig_info = NULL;	/*XXX*/
@@ -668,7 +668,6 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 
 		if (inet_rsk(req)->saw_mpc && !mopt.saw_mpc)
 			inet_rsk(req)->saw_mpc = false;
-
 
 		if (!tcp_oow_rate_limited(sock_net(sk), skb,
 					  LINUX_MIB_TCPACKSKIPPEDSYNRECV,
@@ -829,7 +828,7 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 			return tcp_sk(child)->mpcb->master_sk;
 	} else if (own_req) {
 		return mptcp_check_req_child(sk, child, req, skb, &mopt);
-	}
+	}	
 
 	sock_rps_save_rxhash(child, skb);
 	tcp_synack_rtt_meas(child, req);
@@ -892,8 +891,8 @@ int tcp_child_process(struct sock *parent, struct sock *child,
 		 * socket does not protect us more.
 		 */
 		if (mptcp(tcp_sk(child)))
-			mptcp_prepare_for_backlog(child, skb);
-		__sk_add_backlog(meta_sk, skb);
+			mptcp_prepare_for_backlog(child, skb);		 
+		__sk_add_backlog(child, skb);
 	}
 
 	if (mptcp(tcp_sk(child)))

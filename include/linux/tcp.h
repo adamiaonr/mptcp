@@ -29,9 +29,14 @@ static inline struct tcphdr *tcp_hdr(const struct sk_buff *skb)
 	return (struct tcphdr *)skb_transport_header(skb);
 }
 
+static inline unsigned int __tcp_hdrlen(const struct tcphdr *th)
+{
+	return th->doff * 4;
+}
+
 static inline unsigned int tcp_hdrlen(const struct sk_buff *skb)
 {
-	return tcp_hdr(skb)->doff * 4;
+	return __tcp_hdrlen(tcp_hdr(skb));
 }
 
 static inline struct tcphdr *inner_tcp_hdr(const struct sk_buff *skb)
@@ -329,10 +334,9 @@ struct tcp_sock {
 	struct sk_buff* lost_skb_hint;
 	struct sk_buff *retransmit_skb_hint;
 
-	/* OOO segments go in this list. Note that socket lock must be held,
-	 * as we do not use sk_buff_head lock.
-	 */
-	struct sk_buff_head	out_of_order_queue;
+	/* OOO segments go in this rbtree. Socket lock must be held. */
+	struct rb_root	out_of_order_queue;
+	struct sk_buff	*ooo_last_skb; /* cache rb_last(out_of_order_queue) */
 
 	/* SACKs data, these 2 need to be together (see tcp_options_write) */
 	struct tcp_sack_block duplicate_sack[1]; /* D-SACK block */
@@ -374,7 +378,7 @@ struct tcp_sock {
 
 /* Receiver queue space */
 	struct {
-		int	space;
+		u32	space;
 		u32	seq;
 		u32	time;
 	} rcvq_space;
@@ -452,8 +456,9 @@ enum tsq_flags {
 	TCP_MTU_REDUCED_DEFERRED,  /* tcp_v{4|6}_err() could not call
 				    * tcp_v{4|6}_mtu_reduced()
 				    */
+
 	MPTCP_PATH_MANAGER_DEFERRED, /* MPTCP deferred creation of new subflows */
-	MPTCP_SUB_DEFERRED, /* A subflow got deferred - process them */
+	MPTCP_SUB_DEFERRED, /* A subflow got deferred - process them */				    
 };
 
 static inline struct tcp_sock *tcp_sk(const struct sock *sk)

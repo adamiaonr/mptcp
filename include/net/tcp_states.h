@@ -17,6 +17,7 @@ enum {
 	TCP_ESTABLISHED = 1,
 	TCP_SYN_SENT,
 	TCP_SYN_RECV,
+	TCP_RST_WAIT,
 	TCP_FIN_WAIT1,
 	TCP_FIN_WAIT2,
 	TCP_TIME_WAIT,
@@ -26,7 +27,6 @@ enum {
 	TCP_LISTEN,
 	TCP_CLOSING,	/* Now a valid state */
 	TCP_NEW_SYN_RECV,
-	TCP_RST_WAIT,
 
 	TCP_MAX_STATES	/* Leave at the end! */
 };
@@ -39,6 +39,7 @@ enum {
 	TCPF_ESTABLISHED = (1 << 1),
 	TCPF_SYN_SENT	 = (1 << 2),
 	TCPF_SYN_RECV	 = (1 << 3),
+	TCPF_RST_WAIT    = (1 << 13),
 	TCPF_FIN_WAIT1	 = (1 << 4),
 	TCPF_FIN_WAIT2	 = (1 << 5),
 	TCPF_TIME_WAIT	 = (1 << 6),
@@ -48,7 +49,6 @@ enum {
 	TCPF_LISTEN	 = (1 << 10),
 	TCPF_CLOSING	 = (1 << 11),
 	TCPF_NEW_SYN_RECV = (1 << 12),
-	TCPF_RST_WAIT	 = (1 << 13),
 };
 
 #endif	/* _LINUX_TCP_STATES_H */

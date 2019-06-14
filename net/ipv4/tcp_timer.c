@@ -47,11 +47,19 @@ void tcp_write_err(struct sock *sk)
  * to prevent DoS attacks. It is called when a retransmission timeout
  * or zero probe timeout occurs on orphaned socket.
  *
+ * Also close if our net namespace is exiting; in that case there is no
+ * hope of ever communicating again since all netns interfaces are already
+ * down (or about to be down), and we need to release our dst references,
+ * which have been moved to the netns loopback interface, so the namespace
+ * can finish exiting.  This condition is only possible if we are a kernel
+ * socket, as those do not hold references to the namespace.
+ *
  * Criteria is still not confirmed experimentally and may change.
  * We kill the socket, if:
  * 1. If number of orphaned sockets exceeds an administratively configured
  *    limit.
  * 2. If we have strong memory pressure.
+ * 3. If our net namespace is exiting.
  */
 static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 {
@@ -80,6 +88,13 @@ static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPABORTONMEMORY);
 		return 1;
 	}
+
+	if (!check_net(sock_net(sk))) {
+		/* Not possible to send reset; just close */
+		tcp_done(sk);
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -285,8 +300,8 @@ static void tcp_delack_timer(unsigned long data)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct sock *meta_sk = mptcp(tp) ? mptcp_meta_sk(sk) : sk;
 
-	bh_lock_sock(meta_sk);
-	if (!sock_owned_by_user(meta_sk)) {
+	bh_lock_sock(sk);
+	if (!sock_owned_by_user(sk)) {
 		tcp_delack_timer_handler(sk);
 	} else {
 		inet_csk(sk)->icsk_ack.blocked = 1;
@@ -295,7 +310,7 @@ static void tcp_delack_timer(unsigned long data)
 		if (!test_and_set_bit(TCP_DELACK_TIMER_DEFERRED, &tcp_sk(sk)->tsq_flags))
 			sock_hold(sk);
 		if (mptcp(tp))
-			mptcp_tsq_flags(sk);
+			mptcp_tsq_flags(sk);		
 	}
 	bh_unlock_sock(meta_sk);
 	sock_put(sk);
@@ -544,7 +559,7 @@ void tcp_write_timer_handler(struct sock *sk)
 		break;
 	case ICSK_TIME_RETRANS:
 		icsk->icsk_pending = 0;
-		tcp_sk(sk)->ops->retransmit_timer(sk);
+		tcp_retransmit_timer(sk);
 		break;
 	case ICSK_TIME_PROBE0:
 		icsk->icsk_pending = 0;
@@ -559,7 +574,7 @@ out:
 static void tcp_write_timer(unsigned long data)
 {
 	struct sock *sk = (struct sock *)data;
-	struct sock *meta_sk = mptcp(tcp_sk(sk)) ? mptcp_meta_sk(sk) : sk;
+	struct sock *meta_sk = mptcp(tcp_sk(sk)) ? mptcp_meta_sk(sk) : sk;	
 
 	bh_lock_sock(meta_sk);
 	if (!sock_owned_by_user(meta_sk)) {

@@ -379,7 +379,7 @@ struct mptcp_options_received;
 
 void tcp_cleanup_rbuf(struct sock *sk, int copied);
 void tcp_cwnd_validate(struct sock *sk, bool is_cwnd_limited);
-void tcp_enter_quickack_mode(struct sock *sk);
+// void tcp_enter_quickack_mode(struct sock *sk);
 int tcp_close_state(struct sock *sk);
 void tcp_minshall_update(struct tcp_sock *tp, unsigned int mss_now,
 			 const struct sk_buff *skb);
@@ -489,6 +489,7 @@ ssize_t tcp_splice_read(struct socket *sk, loff_t *ppos,
 			struct pipe_inode_info *pipe, size_t len,
 			unsigned int flags);
 
+void tcp_enter_quickack_mode(struct sock *sk, unsigned int max_quickacks);
 static inline void tcp_dec_quickack_mode(struct sock *sk,
 					 const unsigned int pkts)
 {
@@ -641,7 +642,7 @@ static inline u32 tcp_cookie_time(void)
 u32 __cookie_v4_init_sequence(const struct iphdr *iph, const struct tcphdr *th,
 			      u16 *mssp);
 __u32 cookie_v4_init_sequence(struct request_sock *req, const struct sock *sk,
-			      const struct sk_buff *skb, __u16 *mss);
+                             const struct sk_buff *skb, __u16 *mss);
 __u32 cookie_init_timestamp(struct request_sock *req);
 bool cookie_timestamp_decode(struct tcp_options_received *opt);
 bool cookie_ecn_ok(const struct tcp_options_received *opt,
@@ -655,7 +656,7 @@ struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb);
 u32 __cookie_v6_init_sequence(const struct ipv6hdr *iph,
 			      const struct tcphdr *th, u16 *mssp);
 __u32 cookie_v6_init_sequence(struct request_sock *req, const struct sock *sk,
-			      const struct sk_buff *skb, __u16 *mss);
+                             const struct sk_buff *skb, __u16 *mss);
 #endif
 /* tcp_output.c */
 
@@ -677,6 +678,7 @@ void tcp_send_fin(struct sock *sk);
 void tcp_send_active_reset(struct sock *sk, gfp_t priority);
 int tcp_send_synack(struct sock *);
 void tcp_push_one(struct sock *, unsigned int mss_now);
+void __tcp_send_ack(struct sock *sk, u32 rcv_nxt);
 void tcp_send_ack(struct sock *sk);
 void tcp_send_delayed_ack(struct sock *sk);
 void tcp_send_loss_probe(struct sock *sk);
@@ -685,7 +687,7 @@ bool tcp_schedule_loss_probe(struct sock *sk);
 u16 tcp_select_window(struct sock *sk);
 int select_size(const struct sock *sk, bool sg);
 bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
-		int push_one, gfp_t gfp);
+               int push_one, gfp_t gfp);
 
 /* tcp_input.c */
 void tcp_resume_early_retransmit(struct sock *sk);
@@ -773,7 +775,7 @@ static inline void tcp_fast_path_check(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 
-	if (skb_queue_empty(&tp->out_of_order_queue) &&
+	if (RB_EMPTY_ROOT(&tp->out_of_order_queue) &&
 	    tp->rcv_wnd &&
 	    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&
 	    !tp->urg_data)
@@ -959,8 +961,6 @@ enum tcp_ca_event {
 	CA_EVENT_LOSS,		/* loss timeout */
 	CA_EVENT_ECN_NO_CE,	/* ECT set, but not CE marked */
 	CA_EVENT_ECN_IS_CE,	/* received CE marked IP packet */
-	CA_EVENT_DELAYED_ACK,	/* Delayed ack is sent */
-	CA_EVENT_NON_DELAYED_ACK,
 };
 
 /* Information about inbound ACK, passed to cong_ops->in_ack_event() */
@@ -1340,9 +1340,11 @@ void tcp_select_initial_window(int __space, __u32 mss, __u32 *rcv_wnd,
 
 static inline int tcp_win_from_space(int space)
 {
-	return sysctl_tcp_adv_win_scale<=0 ?
-		(space>>(-sysctl_tcp_adv_win_scale)) :
-		space - (space>>sysctl_tcp_adv_win_scale);
+	int tcp_adv_win_scale = sysctl_tcp_adv_win_scale;
+
+	return tcp_adv_win_scale <= 0 ?
+		(space>>(-tcp_adv_win_scale)) :
+		space - (space>>tcp_adv_win_scale);
 }
 
 #ifdef CONFIG_MPTCP

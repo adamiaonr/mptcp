@@ -419,6 +419,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 	}
 
 	icsk = inet_csk(sk);
+	// tp = tcp_sk(sk);
 	/* XXX (TFO) - tp->snd_una should be ISN (tcp_create_openreq_child() */
 	fastopen = tp->fastopen_rsk;
 	snd_una = fastopen ? tcp_rsk(fastopen)->snt_isn : tp->snd_una;
@@ -1657,6 +1658,8 @@ int tcp_v4_rcv(struct sk_buff *skb)
 
 lookup:
 	sk = __inet_lookup_skb(&tcp_hashinfo, skb, th->source, th->dest);
+	if (!sk)
+		goto no_tcp_socket;
 
 process:
 	if (sk && sk->sk_state == TCP_TIME_WAIT)
@@ -1673,6 +1676,10 @@ process:
 		if (unlikely(tcp_v4_inbound_md5_hash(sk, skb))) {
 			reqsk_put(req);
 			goto discard_it;
+		}
+		if (tcp_checksum_complete(skb)) {
+			reqsk_put(req);
+			goto csum_error;
 		}
 		if (unlikely(sk->sk_state != TCP_LISTEN && !is_meta_sk(sk))) {
 			inet_csk_reqsk_queue_drop_and_put(sk, req);
@@ -1817,6 +1824,7 @@ discard_it:
 	return 0;
 
 discard_and_relse:
+	sk_drops_add(sk, skb);
 	sock_put(sk);
 	goto discard_it;
 
@@ -1952,7 +1960,7 @@ void tcp_v4_destroy_sock(struct sock *sk)
 	tcp_write_queue_purge(sk);
 
 	/* Cleans up our, hopefully empty, out_of_order_queue. */
-	__skb_queue_purge(&tp->out_of_order_queue);
+	skb_rbtree_purge(&tp->out_of_order_queue);
 
 #ifdef CONFIG_TCP_MD5SIG
 	/* Clean up the MD5 key list, if any */

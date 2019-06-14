@@ -174,6 +174,13 @@ static struct sock *tcp_fastopen_create_child(struct sock *sk,
 
 	atomic_set(&req->rsk_refcnt, 2);
 
+	/* Now finish processing the fastopen child socket. */
+	// inet_csk(child)->icsk_af_ops->rebuild_header(child);
+	// tcp_init_congestion_control(child);
+	// tcp_mtup_init(child);
+	// tcp_init_metrics(child);
+	// tcp_init_buffer_space(child);
+
 	/* Queue the data carried in the SYN packet.
 	 * We used to play tricky games with skb_get().
 	 * With lockless listener, it is a dead end.
